@@ -1,10 +1,4 @@
 ﻿
-//和网络以及逻辑处理 有关的函数放这里
-/*
-公众号：程序员速成     q群：716480601
-王健伟老师 《Linux C++通讯架构实战》
-商业级质量的代码，完整的项目，帮你提薪至少10K
-*/
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,6 +25,19 @@
 #include "ngx_logiccomm.h"  
 #include "ngx_c_lockmutex.h"  
 
+#include "json.h"
+#include "chatservice.h"
+
+#include <iostream>
+#include <functional>
+#include <string>
+using namespace std;
+using namespace placeholders;
+using json = nlohmann::json;
+
+
+using namespace std;
+
 //定义成员函数指针
 typedef bool (CLogicSocket::*handler)(  lpngx_connection_t pConn,      //连接池中连接的指针
                                         LPSTRUC_MSG_HEADER pMsgHeader,  //消息头指针
@@ -50,11 +57,54 @@ static const handler statusHandler[] =
     //开始处理具体的业务逻辑
     &CLogicSocket::_HandleRegister,                         //【5】：实现具体的注册功能
     &CLogicSocket::_HandleLogIn,                            //【6】：实现具体的登录功能
+    &CLogicSocket::_HandleOnMessage,                        //【7】：实现业务逻辑与网络框架解耦
     //......其他待扩展，比如实现攻击功能，实现加血功能等等；
 
 
 };
 #define AUTH_TOTAL_COMMANDS sizeof(statusHandler)/sizeof(handler) //整个命令有多少个，编译时即可知道
+
+
+
+bool CLogicSocket::_HandleOnMessage(lpngx_connection_t pConn,LPSTRUC_MSG_HEADER pMsgHeader,char *pPkgBody,unsigned short iBodyLength) {
+    ngx_log_stderr(0,"执行了CLogicSocket::_HandleOnMessage()!");
+    
+    //(1)首先判断包体的合法性
+    if(pPkgBody == NULL) //具体看客户端服务器约定，如果约定这个命令[msgCode]必须带包体，那么如果不带包体，就认为是恶意包，直接不处理    
+    {        
+        return false;
+    }
+
+    //(2)对于同一个用户，可能同时发送来多个请求过来，造成多个线程同时为该 用户服务，比如以网游为例，用户要在商店中买A物品，又买B物品，而用户的钱 只够买A或者B，不够同时买A和B呢？
+       //那如果用户发送购买命令过来买了一次A，又买了一次B，如果是两个线程来执行同一个用户的这两次不同的购买命令，很可能造成这个用户购买成功了 A，又购买成功了 B
+       //所以，为了稳妥起见，针对某个用户的命令，我们一般都要互斥,我们需要增加临界的变量于ngx_connection_s结构中
+    CLock lock(&pConn->logicPorcMutex); //凡是和本用户有关的访问都互斥
+
+    char tmp[1024] = {0};
+    memcpy(tmp, pPkgBody, iBodyLength);
+    string buf = tmp;
+
+    // 测试，添加json打印代码
+    cout << "on message 中接收到的包体: " << buf << endl;
+
+    // 数据的反序列化
+    json js = json::parse(buf);
+    // 达到的目的：完全解耦网络模块的代码和业务模块的代码
+    // 通过js["msgid"] 获取=》业务handler=》conn  js  time
+    auto msgHandler = ChatService::instance()->getHandler(js["msgid"].get<int>());
+    // 回调消息绑定好的事件处理器，来执行相应的业务处理
+    msgHandler(pConn, js, pMsgHeader);
+
+    return 0;
+}
+
+
+
+
+
+
+
+
 
 //构造函数
 CLogicSocket::CLogicSocket()
@@ -160,12 +210,15 @@ void CLogicSocket::procPingTimeOutChecking(LPSTRUC_MSG_HEADER tmpmsg,time_t cur_
         if(/*m_ifkickTimeCount == 1 && */m_ifTimeOutKick == 1)  //能调用到本函数第一个条件肯定成立，所以第一个条件加不加无所谓，主要是第二个条件
         {
             //到时间直接踢出去的需求
+            ChatService::instance()->clientCloseException(p_Conn);
             zdClosesocketProc(p_Conn); 
         }            
         else if( (cur_time - p_Conn->lastPingTime ) > (m_iWaitTime*3+10) ) //超时踢的判断标准就是 每次检查的时间间隔*3，超过这个时间没发送心跳包，就踢【大家可以根据实际情况自由设定】
         {
             //踢出去【如果此时此刻该用户正好断线，则这个socket可能立即被后续上来的连接复用  如果真有人这么倒霉，赶上这个点了，那么可能错踢，错踢就错踢】            
             //ngx_log_stderr(0,"时间到不发心跳包，踢出去!");   //感觉OK
+
+            ChatService::instance()->clientCloseException(p_Conn);
             zdClosesocketProc(p_Conn); 
         }   
              
@@ -317,7 +370,9 @@ bool CLogicSocket::_HandleLogIn(lpngx_connection_t pConn,LPSTRUC_MSG_HEADER pMsg
     pPkgHeader->pkgLen  = htons(m_iLenPkgHeader + iSendLen);    
     LPSTRUCT_LOGIN p_sendInfo = (LPSTRUCT_LOGIN)(p_sendbuf+m_iLenMsgHeader+m_iLenPkgHeader);
     pPkgHeader->crc32   = p_crc32->Get_CRC((unsigned char *)p_sendInfo,iSendLen);
-    pPkgHeader->crc32   = htonl(pPkgHeader->crc32);		   
+    pPkgHeader->crc32   = htonl(pPkgHeader->crc32);
+
+
     //ngx_log_stderr(0,"成功收到了登录并返回结果！");
     msgSend(p_sendbuf);
     return true;

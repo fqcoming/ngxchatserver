@@ -3,10 +3,10 @@
 
 ifeq ($(DEBUG),true)
 #-g是生成调试信息。GNU调试器可以利用该信息
-CC = g++ -std=c++11 -g 
+CC = g++ -std=c++17 -g 
 VERSION = debug
 else
-CC = g++ -std=c++11
+CC = g++ -std=c++17 
 VERSION = release
 endif
 
@@ -69,7 +69,7 @@ $(BIN):$(LINK_OBJ)
 
 #一些变量：$@：目标，     $^：所有目标依赖
 # gcc -o 是生成可执行文件
-	$(CC) -o $@ $^ -lpthread
+	$(CC) -o $@ $^ -lpthread -lmysqlclient -lhiredis
 
 #----------------------------------------------------------------1end-------------------
 

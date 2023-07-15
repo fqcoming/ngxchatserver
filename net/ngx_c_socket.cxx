@@ -1,10 +1,4 @@
 ﻿
-//和网络 有关的函数放这里
-/*
-公众号：程序员速成     q群：716480601
-王健伟老师 《Linux C++通讯架构实战》
-商业级质量的代码，完整的项目，帮你提薪至少10K
-*/
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -405,6 +399,7 @@ void CSocekt::msgSend(char *psendbuf)
     m_MsgSendQueue.push_back(psendbuf);     
     ++m_iSendMsgQueueCount;   //原子操作
 
+    printf("消息加入成功\n");
     //将信号量的值+1,这样其他卡在sem_wait的就可以走下去
     if(sem_post(&m_semEventSendQueue)==-1)  //让ServerSendQueueThread()流程走下来干活
     {
@@ -896,7 +891,7 @@ void* CSocekt::ServerSendQueueThread(void* threadData)
             if(errno != EINTR) //这个我就不算个错误了【当阻塞于某个慢系统调用的一个进程捕获某个信号且相应信号处理函数返回时，该系统调用可能返回一个EINTR错误。】
                 ngx_log_stderr(errno,"CSocekt::ServerSendQueueThread()中sem_wait(&pSocketObj->m_semEventSendQueue)失败.");            
         }
-
+        printf("有数据要发送\n");
         //一般走到这里都表示需要处理数据收发了
         if(g_stopEvent != 0)  //要求整个进程退出
             break;
@@ -909,6 +904,8 @@ void* CSocekt::ServerSendQueueThread(void* threadData)
             pos    = pSocketObj->m_MsgSendQueue.begin();
 			posend = pSocketObj->m_MsgSendQueue.end();
 
+            printf("发送消息队列有%ld个消息\n", pSocketObj->m_MsgSendQueue.size());
+
             while(pos != posend)
             {
                 pMsgBuf = (*pos);                          //拿到的每个消息都是 消息头+包头+包体【但要注意，我们是不发送消息头给客户端的】
@@ -918,8 +915,11 @@ void* CSocekt::ServerSendQueueThread(void* threadData)
 
                 //包过期，因为如果 这个连接被回收，比如在ngx_close_connection(),inRecyConnectQueue()中都会自增iCurrsequence
                      //而且这里有没必要针对 本连接 来用m_connectionMutex临界 ,只要下面条件成立，肯定是客户端连接已断，要发送的数据肯定不需要发送了
+                
+                printf("包序号: %ld, 连接序号: %ld\n", pMsgHeader->iCurrsequence, p_Conn->iCurrsequence);
                 if(p_Conn->iCurrsequence != pMsgHeader->iCurrsequence) 
                 {
+                    printf("包过期\n");
                     //本包中保存的序列号与p_Conn【连接池中连接】中实际的序列号已经不同，丢弃此消息，小心处理该消息的删除
                     pos2=pos;
                     pos++;
@@ -929,13 +929,16 @@ void* CSocekt::ServerSendQueueThread(void* threadData)
                     continue;
                 } //end if
 
+                printf("包没有过期\n");
                 if(p_Conn->iThrowsendCount > 0) 
                 {
+                    printf("靠系统驱动来发送消息，所以这里不能再发送");
                     //靠系统驱动来发送消息，所以这里不能再发送
                     pos++;
                     continue;
                 }
 
+                printf("直接发送\n");
                 --p_Conn->iSendCount;   //发送队列中有的数据条目数-1；
             
                 //走到这里，可以发送消息，一些必须的信息记录，要发送的东西也要从发送队列里干掉
@@ -957,9 +960,12 @@ void* CSocekt::ServerSendQueueThread(void* threadData)
                 //(1)直接调用write或者send发送数据
                 //ngx_log_stderr(errno,"即将发送数据%ud。",p_Conn->isendlen);
 
+                printf("要发送的数据内容是: %s\n", (char*)p_Conn->psendbuf + sizeof(COMM_PKG_HEADER));
+
                 sendsize = pSocketObj->sendproc(p_Conn,p_Conn->psendbuf,p_Conn->isendlen); //注意参数
                 if(sendsize > 0)
                 {                    
+                    printf("发送成功\n");
                     if(sendsize == p_Conn->isendlen) //成功发送出去了数据，一下就发送出去这很顺利
                     {
                         //成功发送的和要求发送的数据相等，说明全部发送成功了 发送缓冲区去了【数据全部发完】

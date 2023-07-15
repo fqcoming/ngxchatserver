@@ -126,7 +126,7 @@ public:
 	int ngx_epoll_oper_event(int fd,uint32_t eventtype,uint32_t flag,int bcaction,lpngx_connection_t pConn); 
 	                                                                      //epoll操作事件
 	
-protected:
+// protected:
 	//数据发送相关
 	void msgSend(char *psendbuf);                                         //把数据扔到待发送对列中 
 	void zdClosesocketProc(lpngx_connection_t p_Conn);                    //主动关闭一个连接时的要做些善后的处理函数	

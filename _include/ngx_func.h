@@ -3,6 +3,11 @@
 #ifndef __NGX_FUNC_H__
 #define __NGX_FUNC_H__
 
+#include <stddef.h>
+#include <stdarg.h>
+
+typedef unsigned char u_char;
+
 //字符串相关函数
 void   Rtrim(char *string);
 void   Ltrim(char *string);
